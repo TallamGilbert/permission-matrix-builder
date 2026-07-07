@@ -1,0 +1,25 @@
+{
+  "name": "permission-matrix-builder",
+  "version": "1.0.0",
+  "description": "Reusable RBAC middleware with centralized permission matrix",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --loader ts-node/esm --test tests/**/*.test.ts",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "rbac",
+    "authorization",
+    "middleware",
+    "permissions"
+  ],
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  }
+}
