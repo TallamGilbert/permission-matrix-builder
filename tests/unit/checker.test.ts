@@ -109,3 +109,112 @@ describe('Decision Engine - Phase 2', () => {
     });
   });
 });
+
+// ============================================================
+// Phase 3: Wildcards and Deny Precedence
+// ============================================================
+describe('Phase 3 - Wildcards and Deny Precedence', () => {
+  // Matrix specifically designed to test deny vs allow collisions
+  const matrix = defineMatrix({
+    roles: {
+      superadmin: {
+        articles: '*',
+        comments: '*',
+      },
+      editor: {
+        articles: [
+          { action: 'read' },
+          { action: 'update', scope: 'own' },
+          { action: 'delete', deny: true },
+        ],
+      },
+      moderator: {
+        articles: [
+          { action: 'read' },
+          { action: 'update' },
+          { action: 'delete', deny: true },
+        ],
+      },
+      contributor: {
+        articles: [
+          { action: 'create' },
+          { action: 'read' },
+        ],
+      },
+      banned: {
+        articles: [{ action: '*', deny: true }],
+      },
+    },
+  });
+
+  describe('REQ-005: Wildcard actions', () => {
+    it('wildcard grants all actions on a resource type', () => {
+      const user: User = { id: 'user1', roles: ['superadmin'] };
+      assert.strictEqual(checkPermission(matrix, user, 'read', 'articles'), true);
+      assert.strictEqual(checkPermission(matrix, user, 'create', 'articles'), true);
+      assert.strictEqual(checkPermission(matrix, user, 'update', 'articles'), true);
+      assert.strictEqual(checkPermission(matrix, user, 'delete', 'articles'), true);
+    });
+
+    it('wildcard grants actions never individually named', () => {
+      const user: User = { id: 'user1', roles: ['superadmin'] };
+      assert.strictEqual(checkPermission(matrix, user, 'publish', 'articles'), true);
+      assert.strictEqual(checkPermission(matrix, user, 'archive', 'articles'), true);
+      assert.strictEqual(checkPermission(matrix, user, 'export', 'comments'), true);
+    });
+
+    it('wildcard and specific rules coexist in one matrix', () => {
+      const user: User = { id: 'user1', roles: ['superadmin'] };
+      // superadmin has wildcard, editor has specific rules - both work
+      assert.strictEqual(checkPermission(matrix, user, 'read', 'articles'), true);
+      
+      const editorUser: User = { id: 'user2', roles: ['editor'] };
+      assert.strictEqual(checkPermission(matrix, editorUser, 'read', 'articles'), true);
+    });
+  });
+
+  describe('REQ-006: Deny rules override allows', () => {
+    it('explicit deny blocks even when another rule allows', () => {
+      const user: User = { id: 'user1', roles: ['moderator'] };
+      // moderator can update but is explicitly denied delete
+      assert.strictEqual(checkPermission(matrix, user, 'update', 'articles'), true);
+      assert.strictEqual(checkPermission(matrix, user, 'delete', 'articles'), false);
+    });
+
+    it('deny beats a wildcard allow', () => {
+      const user: User = { id: 'user1', roles: ['superadmin', 'editor'] };
+      // superadmin has wildcard allow, editor has explicit deny on delete
+      assert.strictEqual(checkPermission(matrix, user, 'delete', 'articles'), false);
+    });
+
+    it('deny wins regardless of which role carries the deny', () => {
+      const user1: User = { id: 'user1', roles: ['editor', 'superadmin'] };
+      const user2: User = { id: 'user2', roles: ['superadmin', 'editor'] };
+      // Order shouldn't matter - deny always wins
+      assert.strictEqual(checkPermission(matrix, user1, 'delete', 'articles'), false);
+      assert.strictEqual(checkPermission(matrix, user2, 'delete', 'articles'), false);
+    });
+
+    it('deny wins regardless of rule declaration order in matrix', () => {
+      // editor declares delete deny - it wins even though superadmin has wildcard
+      const user: User = { id: 'user1', roles: ['superadmin', 'editor'] };
+      assert.strictEqual(checkPermission(matrix, user, 'delete', 'articles'), false);
+    });
+
+    it('wildcard deny blocks everything on a resource', () => {
+      const user: User = { id: 'user1', roles: ['banned'] };
+      assert.strictEqual(checkPermission(matrix, user, 'read', 'articles'), false);
+      assert.strictEqual(checkPermission(matrix, user, 'create', 'articles'), false);
+      assert.strictEqual(checkPermission(matrix, user, 'anything', 'articles'), false);
+    });
+
+    it('wildcard deny overridden by nothing - even with superadmin', () => {
+      const user: User = { id: 'user1', roles: ['banned', 'superadmin'] };
+      // banned has wildcard deny on articles, superadmin has wildcard allow
+      // deny must win
+      assert.strictEqual(checkPermission(matrix, user, 'read', 'articles'), false);
+      assert.strictEqual(checkPermission(matrix, user, 'create', 'articles'), false);
+      assert.strictEqual(checkPermission(matrix, user, 'update', 'articles'), false);
+    });
+  });
+});
