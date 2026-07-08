@@ -1,28 +1,20 @@
-import type { PermissionMatrix, User, ResourceRules } from './types.js';
+import type { PermissionMatrix, User, OwnedResource, ResourceRules } from './types.js';
 
 /**
- * Decision Engine - Phase 2
+ * Decision Engine - Phase 2-4
  * 
- * Core permission checking logic:
- * - Default deny: anything not explicitly allowed is denied
- * - Multiple roles: user gets combined permissions from all roles
- * - Order-independent: same roles = same decision regardless of order
+ * Core permission checking with:
+ * - Default deny
+ * - Multiple roles
+ * - Wildcards
+ * - Deny precedence
+ * - Ownership checks (Phase 4)
  */
 
-/**
- * Check if a specific rule matches the requested action
- * A rule matches if:
- * - The rule's action equals the requested action, OR
- * - The rule's action is a wildcard '*'
- */
 function ruleMatchesAction(rule: { action: string }, requestedAction: string): boolean {
   return rule.action === requestedAction || rule.action === '*';
 }
 
-/**
- * Get all rules that apply to a given action and resource type
- * across all of a user's roles
- */
 function getApplicableRules(
   matrix: PermissionMatrix,
   userRoles: string[],
@@ -32,15 +24,12 @@ function getApplicableRules(
   const applicableRules: ResourceRules = [];
 
   for (const roleName of userRoles) {
-    // Skip roles that don't exist in the matrix (graceful degradation)
     const role = matrix.roles[roleName];
     if (!role) continue;
 
-    // Skip roles that don't have rules for this resource type
     const resourceRules = role[resourceType];
     if (!resourceRules) continue;
 
-    // Filter rules that match this action
     for (const rule of resourceRules) {
       if (ruleMatchesAction(rule, action)) {
         applicableRules.push(rule);
@@ -52,22 +41,8 @@ function getApplicableRules(
 }
 
 /**
- * Core permission check
- * 
- * Given a user (with roles), an action, and a resource type:
- * - Returns true if the user is allowed
- * - Returns false otherwise (default deny)
- * 
- * Precedence rules:
- * 1. If ANY applicable rule is an explicit deny -> DENIED
- * 2. If ANY applicable rule allows (and no denies) -> ALLOWED
- * 3. If no rules match at all -> DENIED (default deny)
- * 
- * @param matrix - The validated permission matrix
- * @param user - The user making the request (with their roles)
- * @param action - The action being attempted ('read', 'create', etc.)
- * @param resourceType - The type of resource ('articles', 'comments', etc.)
- * @returns true if allowed, false if denied
+ * Core permission check (without ownership)
+ * Used when no resource is involved or ownership doesn't apply
  */
 export function checkPermission(
   matrix: PermissionMatrix,
@@ -75,15 +50,12 @@ export function checkPermission(
   action: string,
   resourceType: string
 ): boolean {
-  // No roles? Default deny.
   if (!user.roles || user.roles.length === 0) {
     return false;
   }
 
-  // Get all rules that could apply to this request
   const applicableRules = getApplicableRules(matrix, user.roles, resourceType, action);
 
-  // No matching rules at all? Default deny.
   if (applicableRules.length === 0) {
     return false;
   }
@@ -95,6 +67,69 @@ export function checkPermission(
     }
   }
 
-  // No denies found, and we have matching rules? Allow.
   return true;
+}
+
+/**
+ * Permission check with ownership (Phase 4)
+ * 
+ * For own-scoped rules, the resource's owner must match the user's ID.
+ * 
+ * Logic:
+ * 1. Collect all applicable rules
+ * 2. If any deny rule matches -> DENIED (regardless of ownership)
+ * 3. If any non-own allow rule matches -> ALLOWED
+ * 4. If only own-scoped rules match -> check ownership
+ *    - Resource owner === user ID -> ALLOWED
+ *    - Resource owner !== user ID -> DENIED
+ * 
+ * @param matrix - The validated permission matrix
+ * @param user - The user making the request
+ * @param action - The action being attempted
+ * @param resourceType - The type of resource
+ * @param resource - The actual resource (must have ownerId for own-scoped checks)
+ * @returns true if allowed, false if denied
+ */
+export function checkPermissionWithResource(
+  matrix: PermissionMatrix,
+  user: User,
+  action: string,
+  resourceType: string,
+  resource: OwnedResource
+): boolean {
+  if (!user.roles || user.roles.length === 0) {
+    return false;
+  }
+
+  const applicableRules = getApplicableRules(matrix, user.roles, resourceType, action);
+
+  if (applicableRules.length === 0) {
+    return false;
+  }
+
+  // Check denies first - deny always wins
+  for (const rule of applicableRules) {
+    if (rule.deny) {
+      return false;
+    }
+  }
+
+  // Separate rules into own-scoped and non-own-scoped
+  const ownScopedRules = applicableRules.filter(r => r.scope === 'own');
+  const globalRules = applicableRules.filter(r => r.scope !== 'own');
+
+  // If any global (non-own) rule allows, it's an automatic allow
+  if (globalRules.length > 0) {
+    return true;
+  }
+
+  // Only own-scoped rules apply - must check ownership
+  if (ownScopedRules.length > 0) {
+    // Ownership is determined by comparing resource owner to user ID
+    // Never trust a caller-supplied claim
+    return resource.ownerId === user.id;
+  }
+
+  // Shouldn't reach here, but default deny
+  return false;
 }

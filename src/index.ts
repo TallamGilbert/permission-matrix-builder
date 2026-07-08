@@ -9,4 +9,4 @@ export type {
 } from './core/types.js';
 
 export { defineMatrix, getRoles, getResourceTypes, getRules } from './core/matrix.js';
-export { checkPermission } from './core/checker.js';
+export { checkPermission, checkPermissionWithResource } from './core/checker.js';
