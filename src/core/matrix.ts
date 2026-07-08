@@ -1,4 +1,5 @@
 import type { MatrixConfig, PermissionMatrix, RuleInput, Rule, RolePermissions, ResourceRules } from './types.js';
+import { resolveInheritance, type MatrixConfigWithInheritance } from './inheritance.js';
 
 function validateRule(resourceType: string, rule: RuleInput): Rule {
   if (typeof rule === 'string') {
@@ -48,26 +49,39 @@ function validateRole(roleName: string, roleConfig: Record<string, string | stri
 }
 
 function validateMatrix(matrixConfig: MatrixConfig): PermissionMatrix {
-  if (!matrixConfig || typeof matrixConfig !== 'object') {
-    throw new Error('Matrix configuration must be an object');
-  }
-  if (!matrixConfig.roles || typeof matrixConfig.roles !== 'object') {
-    throw new Error('Matrix configuration must contain a "roles" object');
-  }
-  const roleNames = Object.keys(matrixConfig.roles);
-  if (roleNames.length === 0) {
-    throw new Error('Matrix must define at least one role');
-  }
   const roles: Record<string, RolePermissions> = {};
-  for (const roleName of roleNames) {
+  for (const roleName of Object.keys(matrixConfig.roles)) {
     roles[roleName] = validateRole(roleName, matrixConfig.roles[roleName]);
   }
   return Object.freeze({ roles }) as PermissionMatrix;
 }
 
-export function defineMatrix(matrixConfig: MatrixConfig): PermissionMatrix {
+export function defineMatrix(matrixConfig: MatrixConfig | MatrixConfigWithInheritance): PermissionMatrix {
   try {
-    return validateMatrix(matrixConfig);
+    // Null/undefined check FIRST
+    if (!matrixConfig || typeof matrixConfig !== 'object') {
+      throw new Error('Matrix configuration must be an object');
+    }
+    if (!matrixConfig.roles || typeof matrixConfig.roles !== 'object') {
+      throw new Error('Matrix configuration must contain a "roles" object');
+    }
+    
+    const roleNames = Object.keys(matrixConfig.roles);
+    if (roleNames.length === 0) {
+      throw new Error('Matrix must define at least one role');
+    }
+
+    // Check if any role has "extends" - if so, resolve inheritance first
+    const hasInheritance = Object.values(matrixConfig.roles).some(
+      (role: any) => role && typeof role === 'object' && role.extends !== undefined
+    );
+
+    if (hasInheritance) {
+      const flatConfig = resolveInheritance(matrixConfig as MatrixConfigWithInheritance);
+      return validateMatrix(flatConfig as MatrixConfig);
+    }
+
+    return validateMatrix(matrixConfig as MatrixConfig);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Invalid permission matrix: ${message}`);
