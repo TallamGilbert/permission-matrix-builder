@@ -11,4 +11,6 @@ export type {
 export { defineMatrix, getRoles, getResourceTypes, getRules } from './core/matrix.js';
 export { checkPermission, checkPermissionWithResource } from './core/checker.js';
 export { requirePermission, requireOwnPermission } from './core/middleware.js';
+export { resolveInheritance } from './core/inheritance.js';
 export type { RequestWithUser, Response, NextFunction } from './core/middleware.js';
+export type { MatrixConfigWithInheritance, RoleConfigWithInheritance } from './core/inheritance.js';
